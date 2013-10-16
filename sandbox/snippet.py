@@ -1,4 +1,5 @@
 #!/bin/usr/env python
+# -*- coding: utf-8 -*-
 
 def __main__():
     print 'Hello world'
