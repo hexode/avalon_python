@@ -19,8 +19,7 @@ class SimpleCLI():
             syntax_descr - используется для описания синтаксиса при
             использовании регвыров
         '''
-        frozen_keys = frozenset(keys)
-        self._commands[frozen_keys] = {
+        self._commands[keys] = {
             'descr': descr,
             'action': action,
             'syntax_descr': syntax_descr,
@@ -33,7 +32,7 @@ class SimpleCLI():
             if type(list(key_set)[0]) == retype:
                 # если перечисление ключей в виде регулярных выражений
                 for pattern in key_set:
-                    res = re.match(pattern, user_input)
+                    res = pattern.match(user_input)
                     if res:
                         return self._commands[key_set]['action'](*res.groups())
             else:

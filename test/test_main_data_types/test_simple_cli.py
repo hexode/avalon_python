@@ -1,6 +1,7 @@
 #!/bin/bash
 #-*- encoding: utf-8 -*-
 import unittest
+from nose.tools import ok_, eq_
 import re
 from mock import Mock
 
