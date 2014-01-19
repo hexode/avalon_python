@@ -42,11 +42,10 @@ TODO:
     use curses.rectangle for draw battlefield borders
 '''
 
-import os
 import sys
 import time
 import curses
-from curses.textpad import Textbox, rectangle
+from curses.textpad import Textbox
 import itertools
 from enum import Enum
 from sig import Signal
@@ -155,7 +154,6 @@ class Warship():
             return None
         return (abs(x2 - x1) or abs(y2 - y1)) + 1
 
-
     # FIXME: Кажется, что этот метод можно упростить
     @staticmethod
     def build_compartments(x1, y1, x2, y2):
@@ -257,7 +255,6 @@ class Fleet():
     def get_fleet(self):
         return self.fleet
 
-
     def on_warship_hit(self):
         self.change.fire()
 
@@ -278,9 +275,14 @@ class Fleet():
     def get_fleet_state():
         damage_report = Fleet.get_damage_report()
 
-        intact_warships_count = len([c for c in damage_report if c == Warship.hull_state.NORMAL])
-        damaged_warships_count = len([c for c in damage_report if c == Warship.hull_state.DAMAGED])
-        destroyed_warships_count = len([c for c in damage_report if c == Warship.hull_state.DESTROYED])
+        def check(value):
+            def _check(c):
+                return c == value
+            return _check
+
+        intact_warships_count = len(filter(check(Warship.hull_state.NORMAL), damage_report))
+        damaged_warships_count = len(filter(check(Warship.hull_state.DAMAGED), damage_report))
+        destroyed_warships_count = len(filter(check(Warship.hull_state.DESTROYED), damage_report))
 
         if intact_warships_count == len(damage_report):
             return Warship.fleet_state.NORMAL
@@ -326,8 +328,6 @@ class Battlefield():
         self.pad.addstr(y + height - 1, x, CORNER)
         self.pad.addstr(y + height - 1, x + width - 1, CORNER)
 
-
-
     def draw_coord_scale(self, x, y):
         ''' отрисовка шкалы '''
         letter_scale = ''.join([chr(i) for i in xrange(ord('A'), ord('A') + 10)])
@@ -339,7 +339,6 @@ class Battlefield():
 
         # рисуем 10 со сдвигом влево
         self.pad.addstr(y + 11, x - 1, str(digit_scale.next()))
-
 
     def render(self, offset_x=1, offset_y=1):
         ''' Отрисовка поля боя '''
@@ -359,7 +358,10 @@ class Battlefield():
                 warship_tile = warship.params['tile']
                 for compartment in warship.get_compartments():
                     x, y, compartment_condition = compartment
-                    compartment_tile = Tile.HIT if compartment_condition == Warship.compartment_state.DESTROYED else warship_tile
+                    if compartment_condition == Warship.compartment_state.DESTROYED:
+                        compartment_tile = Tile.HIT
+                    else:
+                        compartment_tile = warship_tile
                     self.pad.addstr(y + 2, x + 3, compartment_tile)
 
         self.pad.refresh(0, 0, offset_y, offset_x, offset_y + 13, offset_x + 13)
@@ -399,6 +401,7 @@ class Game():
             r'n - new game',
             r'q - quit game'
         ])
+
         def draw_text_center(text, offset_y):
             height, width = screen.stdscr.getmaxyx()
             text_width = max([len(line) for line in text.split('\n')])
@@ -420,7 +423,6 @@ class Game():
         if key == ord('n'):
             return Game(screen)
 
-
     def define_fleet_order(self, is_player):
         stdscr = self.screen.stdscr
 
@@ -429,9 +431,8 @@ class Game():
         battlefield = Battlefield(fleet)
         battlefield.render()
 
-
         while True:
-            warship_coord = box.gather()
+            warship_coord = None  # box.gather()
             if warship_coord:
                 continue
             else:
@@ -441,46 +442,50 @@ class Game():
         while fleet.is_staffed():
         '''
 
+
 class QAREPL():
     def __init__(self, stdscr):
-        history = []
+        self.history = []
         self.stdscr = stdscr
 
-    def save_to_history(msg):
+    def save_to_history(self, msg):
         self.history.append(msg)
         if len(self.history) > self.height:
             self.history = self.history[1:]
 
-    def setup(x, y, width, height):
+    def setup(self, x, y, width, height):
         self.prompt_params = y + height - 1, x
         self.input_params = y + height, x
         self.width = width
         self.x, self.y = x, y
 
     def enable(self):
-        self.editwin = curses.newwin(1, self.width, height - 2, self.x)
-        self.box = Textbox(editwin)
+        self.editwin = curses.newwin(1, self.width, self.height - 2, self.x)
+        self.box = Textbox(self.editwin)
 
-    def disable():
+    def disable(self):
         self.editwin.clear()
         self.editwin = None
-        seld.box = None
+        self.box = None
 
-    def ask(prompt, right, wrong, validator):
+    def ask(self, prompt, right, wrong, validator):
         self.editwin.clear()
-        prompt = self.prompt_params.append + ("Input warship's coordinates:",)
-        stdscr.addstr(*prompt)
+        prompt_args = self.prompt_params.append + (prompt,)
+        self.stdscr.addstr(*prompt_args)
         while True:
-            box.edit()
-            user_input = box.gather()
+            self.box.edit()
+            user_input = self.box.gather()
             if validator(user_input):
-                pass
+                self.save_to_history(prompt)
+                self.save_to_history(user_input)
             else:
                 pass
 
-def tick(screen, scene):
+
+def tick(screen):
     screen.stdscr.clear()
     screen.render()
+
 
 def main(stdscr):
     SCREEN_WIDTH = 10
@@ -499,7 +504,9 @@ def main(stdscr):
     stdscr.clear()
     stdscr.border(0)
     stdscr.refresh()
+
     player_fleet = game.define_fleet_order(is_player=True)
+    player_fleet.take_fire(10, 10)
 
     # GAME LOGIC
     # scene.player_battle_fleet = Fleet()
@@ -509,7 +516,7 @@ def main(stdscr):
     # perframe cycle
     while True:
         t1 = time.clock()
-        tick(screen, scene)
+        tick(screen)
         delta = time.clock() - t1
         downtime = FRAME_DURATION - delta
 
@@ -518,4 +525,3 @@ def main(stdscr):
 
 if __name__ == '__main__':
     curses.wrapper(main)
-
