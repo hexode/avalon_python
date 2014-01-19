@@ -7,7 +7,6 @@ from subprocess import call
 
 arg_list = [
     '--nocapture',
-    '--rednose',
     '--verbosity=2',
     '--with-cov',
     '--cov-report',

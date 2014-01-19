@@ -1,5 +1,4 @@
 argparse==1.2.1
-avalon-python==0.1
 cov-core==1.7
 coverage==3.7
 gorun==1.7
