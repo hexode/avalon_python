@@ -285,8 +285,8 @@ class Fleet():
         self.change.fire()
 
     def make_random_fleet_order(self):
-        # определение друго координат другого конца корабля
-        make_end = lambda x: x * warship_length
+        mul = lambda a, multiplier: (a[0] * multiplier, a[1] * multiplier)
+        add_sectors = lambda a, b: (a[0] + b[0], a[1] + b[1])
 
         # Определяем все возможные сектора
         fleet_map = list(permutations(range(0, 10), 2)) + [(i, i) for i in range(0, 10)]
@@ -294,9 +294,9 @@ class Fleet():
         # находится ли сектор в пределах карты
         def is_out_of_bound(sector, min_x=0, min_y=0, max_x=9, max_y=9):
             x, y = sector
-            return min_x <= x <= max_x and min_y <= y <= max_y
+            return not (min_x <= x <= max_x and min_y <= y <= max_y)
 
-        # определение окрестностей сектора(в пределах карты), включаю сам сектор
+        # определение окрестностей сектора(в пределах карты), включая сам сектор
         def get_near(x, y):
             near = []
             near += [(x - 1, y - 1), (x, y - 1), (x + 1, y - 1)]
@@ -315,9 +315,12 @@ class Fleet():
             shuffle(directions)
 
             for direction in directions:
-                possible_end = tuple(map(make_end, direction))
+                # определяем другой конец корабля
+                possible_end = add_sectors(possible_start, mul(direction, warship_length - 1))
+
                 # если sector выпирает за границу карты,
                 # то берем следующее направление
+
                 if is_out_of_bound(possible_end):
                     break
 
@@ -339,8 +342,9 @@ class Fleet():
 
             while True:
                 # выбираем наобум назанятую точку на карте
+                # TODO
                 if not (fleet_map):
-                    return
+                    break
                 random_ix = randrange(0, len(fleet_map))
                 possible_start = fleet_map[random_ix]
 
@@ -355,9 +359,10 @@ class Fleet():
                     # можно убрать повторяющиеся сектора, но я это не стал делать так
                     # как имхо не будет ни на что сильно влиять
                     vicinity = [get_near(*compartment[:2]) for compartment in warship.get_compartments()]
+                    vicinity = [i for i in itertools.chain.from_iterable(vicinity)]
 
                     # убираем из карты занятые сектора
-                    fleet_map = [sector for sector in fleet_map if sector in vicinity]
+                    fleet_map = [sector for sector in fleet_map if sector not in vicinity]
                     # Если все корабли данного типа укомплектованы
                     # выходим из цикла и переходим к следующему типу
                     if self.is_sufficient(warship):
@@ -390,7 +395,8 @@ class Fleet():
 
     def is_sufficient(self, warship):
         warship_count = len(filter(lambda ws: ws._type == warship._type, self.get_fleet()))
-        return warship_count >= self.warship_set[warship._type]
+        warship_type, warship_max = self.warship_set[warship._type]
+        return warship_count >= warship_max
 
     def is_overlap(self, new_warship):
         fleet = self.get_fleet()
