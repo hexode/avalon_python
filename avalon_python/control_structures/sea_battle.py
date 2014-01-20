@@ -44,9 +44,17 @@ TODO:
 
 import sys
 import time
+
 import curses
 from curses.textpad import Textbox
+
 import itertools
+from itertools import permutations
+
+from random import randrange
+from random import shuffle
+
+import re
 from enum import Enum
 from sig import Signal
 
@@ -104,24 +112,23 @@ class Warship():
     ], xrange)
 
     warship_param_list = [
-        {'_type': warship_types.CORVETTE, 'tile': Tile.CORVETTE, 'length': 1},
-        {'_type': warship_types.FRIGATE, 'tile': Tile.FRIGATE, 'length': 2},
-        {'_type': warship_types.DESTROYER, 'tile': Tile.DESTROYER, 'length': 3},
-        {'_type': warship_types.BATTLECRUISER, 'tile': Tile.BATTLECRUISER, 'length': 4},
+        {'_type': warship_types.CORVETTE, 'title': 'Corvette', 'tile': Tile.CORVETTE, 'length': 1},
+        {'_type': warship_types.FRIGATE,'title': 'Frigate', 'tile': Tile.FRIGATE, 'length': 2},
+        {'_type': warship_types.DESTROYER,'title': 'Destroyer', 'tile': Tile.DESTROYER, 'length': 3},
+        {'_type': warship_types.BATTLECRUISER,'title': 'Battlecruiser', 'tile': Tile.BATTLECRUISER, 'length': 4},
     ]
 
     def __init__(self, x1, y1, x2, y2):
-        coord = locals().copy()
-        del coord['self']
-        warship_type = Warship.determine_type(**coord)
+        coord = (x1, y1, x2, y2)
+        warship_type = Warship.determine_type(*coord)
 
         if warship_type not in Warship.warship_types:
             raise Exception('Unknown warship type')
 
-        self.coord = coord
         self._type = warship_type
+        # XXX: Плохо полaгаться на генерацию Enum индексов
         self.params = self.warship_param_list[warship_type]
-        self.compartments = self.build_compartments(**coord)
+        self.compartments = self.build_compartments(*coord)
 
         # Оповещения о повреждениях
         self.no_damage = Signal()
@@ -134,7 +141,7 @@ class Warship():
         '''
         Определяем по координатам тип корабля
         '''
-        length = Warship.determine_length(**locals())
+        length = Warship.determine_length(x1, y1, x2, y2)
         if not length:
             raise Exception('Wrong coordinates warship')
         if not (0 < length < 5):
@@ -207,6 +214,20 @@ class Warship():
                     return Warship.collision_status.ALREADY_HIT
         return Warship.collision_status.MISS
 
+    def is_near(self, warship):
+        def near(x1, y1, x2, y2):
+            if abs(x2 - x1) in (0, 1) and abs(y2 - y1) in (0, 1):
+                return True
+            return False
+
+        for compartment in warship.get_compartments():
+            for self_compartment in self.get_compartments():
+                x1, y1, x2, y2 = compartment[:2] + self_compartment[:2]
+                if near(x1, y1, x2, y2):
+                    return True
+
+        return False
+
     def get_compartments(self):
         return self.compartments
 
@@ -230,7 +251,18 @@ class Fleet():
         'DEFEAT',
     ], xrange)
 
-    def __init__(self):
+    warship_set = [
+        # (type, quantity)
+        (Warship.warship_types.CORVETTE, 4),
+        (Warship.warship_types.FRIGATE, 3),
+        (Warship.warship_types.DESTROYER, 2),
+        (Warship.warship_types.BATTLECRUISER, 1),
+    ]
+
+    # TODO: delete stdscr
+    def __init__(self, stdscr):
+        self.stdscr = stdscr
+
         # Оповещение о выстреле
         self.shot = Signal()
         # Оповещение о попадании
@@ -252,6 +284,91 @@ class Fleet():
 
         self.change.fire()
 
+    def make_random_fleet_order(self):
+        # определение друго координат другого конца корабля
+        make_end = lambda x: x * warship_length
+
+        # Определяем все возможные сектора
+        fleet_map = list(permutations(range(0, 10), 2)) + [(i, i) for i in range(0, 10)]
+
+        # находится ли сектор в пределах карты
+        def is_out_of_bound(sector, min_x=0, min_y=0, max_x=9, max_y=9):
+            x, y = sector
+            return min_x <= x <= max_x and min_y <= y <= max_y
+
+        # определение окрестностей сектора(в пределах карты), включаю сам сектор
+        def get_near(x, y):
+            near = []
+            near += [(x - 1, y - 1), (x, y - 1), (x + 1, y - 1)]
+            near += [(x - 1, y),     (x, y),     (x + 1, y)]
+            near += [(x - 1, y + 1), (x, y + 1), (x + 1, y + 1)]
+
+            return filter(is_out_of_bound, near)
+
+        # разместить корабль в секторе
+        # возвращает None, если корабль не удалось разместить
+        def locate_warship(warship_length, possible_start):
+            # все возможные направления корабля
+            directions = [(0, -1), (1, 0), (0, 1), (-1, 0)]
+
+            # перемешиваем порядок следования направлений
+            shuffle(directions)
+
+            for direction in directions:
+                possible_end = tuple(map(make_end, direction))
+                # если sector выпирает за границу карты,
+                # то берем следующее направление
+                if is_out_of_bound(possible_end):
+                    break
+
+                try:
+                    # пытаемся создать корабль, в данных секторах
+                    warship = Warship(*(possible_start + possible_end))
+                    # проверяем, что он не перекрывает другие корабли флота
+                    if not self.is_overlap(warship):
+                        # позиция для корабля найдена
+                        return warship
+                except:
+                    pass
+
+            return None
+
+        for warship_type, warship_ammount in self.warship_set:
+            # XXX
+            warship_length = Warship.warship_param_list[warship_type]['length']
+
+            while True:
+                # выбираем наобум назанятую точку на карте
+                if not (fleet_map):
+                    return
+                random_ix = randrange(0, len(fleet_map))
+                possible_start = fleet_map[random_ix]
+
+                # пытаемся разместить в этой точке корабль
+                warship = locate_warship(warship_length, possible_start)
+                # Если корабль можно разместить в этой точке
+                if warship:
+                    # То корабль переходит в командование флота
+                    self.take_under_command(warship)
+
+                    # Составляем карту занятых кораблем секторов
+                    # можно убрать повторяющиеся сектора, но я это не стал делать так
+                    # как имхо не будет ни на что сильно влиять
+                    vicinity = [get_near(*compartment[:2]) for compartment in warship.get_compartments()]
+
+                    # убираем из карты занятые сектора
+                    fleet_map = [sector for sector in fleet_map if sector in vicinity]
+                    # Если все корабли данного типа укомплектованы
+                    # выходим из цикла и переходим к следующему типу
+                    if self.is_sufficient(warship):
+                        break
+                else:
+                    # исключаем из карты точку размещения корабля
+                    # логика следующая: если не поместился данный тип корабля,
+                    # то и корабль большего размера не поместится
+                    fleet_map = [sector for sector in fleet_map if sector != possible_start]
+
+
     def get_fleet(self):
         return self.fleet
 
@@ -270,6 +387,22 @@ class Fleet():
     @staticmethod
     def get_damage_report(fleet):
         return [warship.check_hull_condition() for warship in fleet]
+
+    def is_sufficient(self, warship):
+        warship_count = len(filter(lambda ws: ws._type == warship._type, self.get_fleet()))
+        return warship_count >= self.warship_set[warship._type]
+
+    def is_overlap(self, new_warship):
+        fleet = self.get_fleet()
+        if not len(fleet):
+            return False
+
+        for warship in fleet:
+            if warship.is_near(new_warship):
+                return True
+
+        return False
+
 
     @staticmethod
     def get_fleet_state():
@@ -364,6 +497,9 @@ class Battlefield():
                         compartment_tile = warship_tile
                     self.pad.addstr(y + 2, x + 3, compartment_tile)
 
+        # TODO
+        # Рисуем поля врага
+
         self.pad.refresh(0, 0, offset_y, offset_x, offset_y + 13, offset_x + 13)
 
     def update_battlefield(self, x, y):
@@ -371,8 +507,10 @@ class Battlefield():
 
 
 class Game():
+    # TODO delete stdscr
     def __init__(self, screen):
         self.screen = screen
+        self.stdscr = screen.stdscr
 
     @staticmethod
     def show_intro(screen):
@@ -427,64 +565,138 @@ class Game():
         stdscr = self.screen.stdscr
 
         height, width = stdscr.getmaxyx()
-        fleet = Fleet()
+        fleet = Fleet(stdscr)
         battlefield = Battlefield(fleet)
         battlefield.render()
 
-        while True:
-            warship_coord = None  # box.gather()
-            if warship_coord:
-                continue
-            else:
-                pass
+        repl_height, repl_width = 10, 50
+        repl = QAREPL(stdscr, 1, height - repl_height - 2, repl_width, repl_height)
 
-        '''
-        while fleet.is_staffed():
-        '''
+        re_warship_coord = r"^([a-jA-J](?:[1-9]|10))(?:-([a-jA-J](?:[1-9]|10)))?$"
+
+        def validator(user_input):
+            if user_input in ('random', 'r'):
+                fleet.make_random_fleet_order()
+
+            match = re.search(re_warship_coord, user_input)
+            return match
+
+        def success(user_input):
+            match = re.search(re_warship_coord, user_input)
+
+            a, b = match.groups()
+            convert = lambda pair: (ord(pair[0].lower()) - ord('a'), int(pair[1:]) - 1)
+            coord = convert(a) + convert(b)
+
+            # try:
+            warship = Warship(*coord)
+            warship_title = warship.params['title']
+
+            if fleet.is_sufficient(warship):
+                return 'all warship %s\' type located - try to locate other type' % warship_title
+            if fleet.is_overlap(warship):
+                return 'warship overlaps with another ship'
+
+            fleet.take_under_command(warship)
+            return '%s successfuly located at %s %s' % (warship_title, a, b)
+            # except:
+            #    return 'Coordinates wrong'
+
+        def fail(user_input):
+            return 'Wrong input'
+
+        while True:
+            warship_coord = repl.ask("Input warship's coordinates(e.g. a2-b2):", validator, success, fail)
+            if warship_coord is None:
+                break
 
 
 class QAREPL():
-    def __init__(self, stdscr):
-        self.history = []
+    arrow = '> '
+    def __init__(self, stdscr, x, y, width, height):
         self.stdscr = stdscr
+
+        self.newpad = curses.newpad(height, width)
+
+        self.editwin = curses.newwin(1, width - len(self.arrow), y + height, x + len(self.arrow))
+        self.box = Textbox(self.editwin)
+
+        self.x, self.y = x, y
+        self.width, self.height = width, height
+
+        self.history = []
+
+    def get_params(self):
+        return self.x, self.y, self.width, self.height
+
+    def write_line(self, msg):
+        self.save_to_history(msg)
+        self.render_history()
+
+    def render_prompt(self, prompt):
+        x1, y1, width, height = self.get_params()
+        x2, y2 = x1, y1 + height
+        self.newpad.addstr(height - 1, 0, prompt)
+
+        self.newpad.refresh(0, 0, y1, x1, y1, x2)
+        self.stdscr.addstr(y2, 1, self.arrow)
+        self.stdscr.refresh()
 
     def save_to_history(self, msg):
         self.history.append(msg)
-        if len(self.history) > self.height:
+        if len(self.history) > (self.height - 2):
             self.history = self.history[1:]
 
-    def setup(self, x, y, width, height):
-        self.prompt_params = y + height - 1, x
-        self.input_params = y + height, x
-        self.width = width
-        self.x, self.y = x, y
+    def render_history(self):
+        x, y, width, height = self.get_params()
+        for history_line_ix, history_line in enumerate(reversed(self.history)):
+            current_line_ix = self.height - 2 - history_line_ix
+            self.newpad.addstr(current_line_ix, 0, history_line)
 
-    def enable(self):
-        self.editwin = curses.newwin(1, self.width, self.height - 2, self.x)
-        self.box = Textbox(self.editwin)
+        self.newpad.refresh(0, 0, y, x, y + height, x + width)
 
-    def disable(self):
-        self.editwin.clear()
-        self.editwin = None
-        self.box = None
+    def ask(self, prompt, validator, success, fail):
 
-    def ask(self, prompt, right, wrong, validator):
-        self.editwin.clear()
-        prompt_args = self.prompt_params.append + (prompt,)
-        self.stdscr.addstr(*prompt_args)
         while True:
+            fail_msg = success_msg = None
+
+            self.editwin.clear()
+            self.newpad.clear()
+
+            self.render_prompt(prompt)
+            self.render_history()
+
             self.box.edit()
-            user_input = self.box.gather()
-            if validator(user_input):
+
+            user_input = self.box.gather().strip()
+
+            if user_input:
+                if validator(user_input):
+                    success_msg = success(user_input)
+                else:
+                    fail_msg = fail(user_input)
+
                 self.save_to_history(prompt)
-                self.save_to_history(user_input)
-            else:
-                pass
+                self.save_to_history(self.arrow + user_input)
+                self.save_to_history(success_msg or fail_msg)
+
+            if success_msg:
+                return user_input
+
+
+def debug(stdscr):
+    curses.nocbreak()
+    stdscr.keypad(0)
+    curses.echo()
+    curses.endwin()
+    import pdb
+    pdb.set_trace()
 
 
 def tick(screen):
-    screen.stdscr.clear()
-    screen.render()
+    # screen.stdscr.clear()
+    # screen.render()
+    pass
 
 
 def main(stdscr):
@@ -501,17 +713,13 @@ def main(stdscr):
     screen = Screen(SCREEN_WIDTH, SCREEN_HEIGHT, stdscr)
 
     game = Game.show_intro(screen)
+
     stdscr.clear()
     stdscr.border(0)
     stdscr.refresh()
 
     player_fleet = game.define_fleet_order(is_player=True)
     player_fleet.take_fire(10, 10)
-
-    # GAME LOGIC
-    # scene.player_battle_fleet = Fleet()
-    # # TODO может переместить создание окна в Battlefield
-    # scene.player_battlefield = BattleField(scene.player_battle_fleet, battlefield_pad)
 
     # perframe cycle
     while True:
