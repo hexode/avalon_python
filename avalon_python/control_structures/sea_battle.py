@@ -113,9 +113,9 @@ class Warship():
 
     warship_param_list = [
         {'_type': warship_types.CORVETTE, 'title': 'Corvette', 'tile': Tile.CORVETTE, 'length': 1},
-        {'_type': warship_types.FRIGATE,'title': 'Frigate', 'tile': Tile.FRIGATE, 'length': 2},
-        {'_type': warship_types.DESTROYER,'title': 'Destroyer', 'tile': Tile.DESTROYER, 'length': 3},
-        {'_type': warship_types.BATTLECRUISER,'title': 'Battlecruiser', 'tile': Tile.BATTLECRUISER, 'length': 4},
+        {'_type': warship_types.FRIGATE, 'title': 'Frigate', 'tile': Tile.FRIGATE, 'length': 2},
+        {'_type': warship_types.DESTROYER, 'title': 'Destroyer', 'tile': Tile.DESTROYER, 'length': 3},
+        {'_type': warship_types.BATTLECRUISER, 'title': 'Battlecruiser', 'tile': Tile.BATTLECRUISER, 'length': 4},
     ]
 
     def __init__(self, x1, y1, x2, y2):
@@ -243,8 +243,6 @@ class Warship():
 
 
 class Fleet():
-    fleet = []
-
     fleet_state = Enum([
         'NORMAL',
         'HAS_LOSSES',
@@ -261,6 +259,7 @@ class Fleet():
 
     # TODO: delete stdscr
     def __init__(self, stdscr):
+        self.fleet = []
         self.stdscr = stdscr
 
         # Оповещение о выстреле
@@ -377,16 +376,16 @@ class Fleet():
     def get_fleet(self):
         return self.fleet
 
-    def on_warship_hit(self):
+    def on_warship_hit(self, warship):
         self.change.fire()
 
-    def on_warship_already_hit(self):
+    def on_warship_already_hit(self, warship):
         self.change.fire()
 
-    def on_warship_no_damage(self):
+    def on_warship_no_damage(self, warship):
         self.change.fire()
 
-    def on_warship_destroyed(self):
+    def on_warship_destroyed(self, warship):
         self.change.fire()
 
     @staticmethod
@@ -439,7 +438,10 @@ class Fleet():
 
 class Battlefield():
 
-    def __init__(self, fleet, is_enemy=False):
+    # TODO delete stdscr
+    def __init__(self, stdscr, fleet, x, y, is_enemy=False):
+        self.x, self.y = x, y
+        self.stdscr = stdscr
         self.battlefield = [[False for i in range(10)] for i in range(10)]
         self.fleet = fleet
         self.pad = curses.newpad(14, 14)
@@ -479,14 +481,14 @@ class Battlefield():
         # рисуем 10 со сдвигом влево
         self.pad.addstr(y + 11, x - 1, str(digit_scale.next()))
 
-    def render(self, offset_x=1, offset_y=1):
+    def render(self):
         ''' Отрисовка поля боя '''
         tiles = [Tile.EMPTY_SECTOR, Tile.MISS]
 
         # Рисуем поле боя без учета флотилии
         for y, sector_line in enumerate(self.battlefield):
             for x, sector in enumerate(sector_line):
-                self.pad.addstr(y, x, tiles[sector])
+                self.pad.addstr(y + 2, x + 3, tiles[sector])
 
         self.draw_border(2, 1, 12, 12)
         self.draw_coord_scale(1, 0)
@@ -506,7 +508,7 @@ class Battlefield():
         # TODO
         # Рисуем поля врага
 
-        self.pad.refresh(0, 0, offset_y, offset_x, offset_y + 13, offset_x + 13)
+        self.pad.refresh(0, 0, self.y, self.x, self.y + 13, self.x + 13)
 
     def update_battlefield(self, x, y):
         self.battlefield[x][y] = True
@@ -560,19 +562,20 @@ class Game():
         offset_y = draw_text_center(title, 0)
         offset_y = draw_text_center(warship, offset_y + 1)
         draw_text_center(menu, offset_y + 1)
-        key = screen.stdscr.getch()
 
-        if key == ord('q'):
-            sys.exit()
-        if key == ord('n'):
-            return Game(screen)
+        while True:
+            key = screen.stdscr.getch()
+            if chr(key) in ('q', 'Q'):
+                sys.exit()
+            if chr(key) in ('n', 'N'):
+                return Game(screen)
 
     def define_fleet_order(self, is_player):
         stdscr = self.screen.stdscr
 
         height, width = stdscr.getmaxyx()
         fleet = Fleet(stdscr)
-        battlefield = Battlefield(fleet)
+        battlefield = Battlefield(stdscr, fleet, 1, 1)
         battlefield.render()
 
         repl_height, repl_width = 10, 50
@@ -582,7 +585,7 @@ class Game():
 
         def validator(user_input):
             if user_input in ('random', 'r'):
-                fleet.make_random_fleet_order()
+                return 'random'
 
             match = re.search(re_warship_coord, user_input)
             return match
@@ -594,27 +597,32 @@ class Game():
             convert = lambda pair: (ord(pair[0].lower()) - ord('a'), int(pair[1:]) - 1)
             coord = convert(a) + convert(b)
 
-            # try:
-            warship = Warship(*coord)
-            warship_title = warship.params['title']
+            try:
+                warship = Warship(*coord)
+                warship_title = warship.params['title']
 
-            if fleet.is_sufficient(warship):
-                return 'all warship %s\' type located - try to locate other type' % warship_title
-            if fleet.is_overlap(warship):
-                return 'warship overlaps with another ship'
+                if fleet.is_sufficient(warship):
+                    return 'all warship %s\' type located - try to locate other type' % warship_title
+                if fleet.is_overlap(warship):
+                    return 'warship overlaps with another ship'
 
-            fleet.take_under_command(warship)
-            return '%s successfuly located at %s %s' % (warship_title, a, b)
-            # except:
-            #    return 'Coordinates wrong'
+                fleet.take_under_command(warship)
+                return '%s successfuly located at %s %s' % (warship_title, a, b)
+            except:
+                return 'Coordinates wrong'
 
         def fail(user_input):
             return 'Wrong input'
 
         while True:
             warship_coord = repl.ask("Input warship's coordinates(e.g. a2-b2):", validator, success, fail)
-            if warship_coord is None:
-                break
+            if warship_coord == 'random':
+                fleet.make_random_fleet_order()
+                repl.close()
+                return (fleet, battlefield)
+
+        repl.close()
+        return (fleet, battlefield)
 
 
 class QAREPL():
@@ -662,7 +670,6 @@ class QAREPL():
         self.newpad.refresh(0, 0, y, x, y + height, x + width)
 
     def ask(self, prompt, validator, success, fail):
-
         while True:
             fail_msg = success_msg = None
 
@@ -677,7 +684,11 @@ class QAREPL():
             user_input = self.box.gather().strip()
 
             if user_input:
-                if validator(user_input):
+                validation = validator(user_input)
+                if validation:
+                    if validation == 'random':
+                        return validation
+
                     success_msg = success(user_input)
                 else:
                     fail_msg = fail(user_input)
@@ -688,6 +699,11 @@ class QAREPL():
 
             if success_msg:
                 return user_input
+
+    def close(self):
+        self.stdscr.clear()
+        self.newpad.clear()
+        self.editwin.clear()
 
 
 def debug(stdscr):
@@ -713,7 +729,7 @@ def main(stdscr):
 
     FRAME_DURATION = 1000.0 / FPS
 
-    # curses.curs_set(0) # отключение курсора
+    curses.curs_set(0)  # отключение курсора
     stdscr.border(0)
 
     screen = Screen(SCREEN_WIDTH, SCREEN_HEIGHT, stdscr)
@@ -724,8 +740,30 @@ def main(stdscr):
     stdscr.border(0)
     stdscr.refresh()
 
-    player_fleet = game.define_fleet_order(is_player=True)
-    player_fleet.take_fire(10, 10)
+    player_fleet, player_battlefield = game.define_fleet_order(is_player=True)
+
+    enemy_fleet = Fleet(stdscr)
+    enemy_battlefield = Battlefield(stdscr, enemy_fleet, 30, 1)
+    enemy_battlefield.render()
+    enemy_fleet.make_random_fleet_order()
+
+    stdscr.box()
+    stdscr.refresh()
+    enemy_battlefield.render()
+    player_battlefield.render()
+
+    def validator(user_input):
+        re_sector = r'^([a-jA-J])([1-9]|10)$'
+
+    success = lambda x: False
+    fail = lambda x: 'Wrong input'
+
+    height, width = stdscr.getmaxyx()
+    repl_height, repl_width = 10, 50
+
+    repl = QAREPL(stdscr, 1, height - repl_height - 2, repl_width, repl_height)
+    a = repl.ask('Chose enemy sector', validator, success, fail)
+
 
     # perframe cycle
     while True:
