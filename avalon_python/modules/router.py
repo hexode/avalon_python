@@ -94,7 +94,7 @@ class IPv4Address(object):
         elif type(raw_addr) == IPv4Address:
             return raw_addr.decimal(), raw_addr.dotted()
         else:
-            raise Exception('Can not parse ip address')
+            raise ValueError('Can not parse ip address')
 
     @staticmethod
     def parse_dotted(addr_dotted):
@@ -161,7 +161,7 @@ class IPv4Address(object):
         if isinstance(other, self.__class__):
             return self.decimal() == other.decimal()
         else:
-            return NotImplemented
+            raise NotImplementedError
 
     def __ne__(self, other):
         result = self.__eq__(other)
@@ -214,7 +214,7 @@ class Router(object):
 
     def get_iface_by_addr(self, addr):
         ''' determine interface name by ipv4 address '''
-        for iface, iface_addr in self.iface_table.items():
+        for iface, iface_addr in self.iface_table.iteritems():
             if addr == iface_addr:
                 return iface
 
@@ -252,7 +252,7 @@ class Router(object):
         # longest prefix match
         _, _, next_hop_addr = max(
             possible_routes,
-            key=lambda route: route[2]
+            key=lambda route: route[1]
         )
 
         return self.get_iface_by_addr(next_hop_addr), next_hop_addr
