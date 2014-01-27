@@ -1,6 +1,5 @@
 #!/usr/bin/env python
 #-*- coding: utf-8
-
 import hmac
 import socket
 from time import time
@@ -8,8 +7,8 @@ from getpass import getpass
 import struct
 
 # Settings
-UDP_IP = "127.0.0.1"
-UDP_PORT = 5005
+UDP_IP = '127.0.0.1'
+UDP_PORT = 9876
 
 
 def generate_msg(secret_key):

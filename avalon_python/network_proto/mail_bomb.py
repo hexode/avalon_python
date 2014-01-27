@@ -22,9 +22,7 @@ from getpass import getpass
 import argparse
 import logging as log
 import struct
-import fcntl
 import errno
-import os
 import sys
 
 import smtplib
@@ -33,8 +31,8 @@ import smtplib
 # SETTINGS
 ####################################################
 # UDP settings
-UDP_IP = '127.0.0.1'
-UDP_PORT = 5005
+UDP_IP = '0.0.0.0'
+UDP_PORT = 9876
 
 # Be sincere
 TO_ADDR = ['some@example.com', ]
@@ -69,29 +67,28 @@ def check_msg(secret_key, msg):
     return calc_digest.digest() == digest, timestamp
 
 
-def deadline(benchmark):
-    return benchmark + TIMEOUT
+def deadline(timestamp):
+    return timestamp + TIMEOUT
 
 
-def time_left(benchmark):
-    remaining_time = deadline(benchmark) - int(time())
+def time_left(timestamp):
+    remaining_time = deadline(timestamp) - int(time())
     return remaining_time if remaining_time >= 0 else 0
 
 
-def time_is_up(benchmark):
-    return time_left(benchmark) == 0
+def time_is_up(timestamp):
+    return time_left(timestamp) == 0
 
 
 def format_time(timestamp):
     days, remainder = divmod(timestamp, DAY)
     hours, remainder = divmod(remainder, HOUR)
     minutes, seconds = divmod(remainder, MINUTE)
-    return '%s:%s:%s:%s' % tuple(map(lambda e: str(e).zfill(2),
-                                    (days, hours, minutes, seconds)))
+    return '%02dd:%02dh:%02dm:%02ds' % (days, hours, minutes, seconds)
 
 
 def send_email(from_addr=FROM_ADDR, to_addr_list=TO_ADDR,
-               cc_addr_list=[], subject=MAIL_SUBJECT,
+               cc_addr_list=(), subject=MAIL_SUBJECT,
                message=MESSAGE,
                login=SMTP_LOGIN, password=SMTP_PASSWORD,
                smtpserver=SMTP_SERVER):
@@ -133,37 +130,36 @@ the timeout will be renewed.
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     sock.bind((UDP_IP, UDP_PORT))
-    fcntl.fcntl(sock, fcntl.F_SETFL, os.O_NONBLOCK)
+    sock.settimeout(1.0)
+    sock.setblocking(0)
 
-    benchmark = int(time())
-    while not time_is_up(benchmark):
+    timestamp = int(time())
+    while not time_is_up(timestamp):
         try:
-            # TODO: add feature - white list ip addresses
-            msg, addr = sock.recvfrom(24)
+            msg, addr = sock.recvfrom(512)
             is_valid, timestamp = check_msg(secret_key, msg)
             if is_valid:
-                benchmark = int(time())
-                formatted_time_left = format_time(time_left(benchmark))
-                log.info('Valid message recieve. Deadline updated: %s' % (
-                    formatted_time_left
-                ))
+                timestamp = int(time())
+                formatted_time_left = format_time(time_left(timestamp))
+                log.info('Valid message recieve. Deadline updated: %s',
+                         formatted_time_left)
             else:
-                formatted_time_left = format_time(time_left(benchmark))
-                log.info('Wrong message recieve. Deadline: %s' % (
-                    formatted_time_left
-                ))
+                formatted_time_left = format_time(time_left(timestamp))
+                log.info('Wrong message recieve. Deadline: %s',
+                         formatted_time_left)
+        except socket.timeout, e:
+            err = e.args[0]
+            if err == 'timed out':
+                continue
         except socket.error, e:
             err = e.args[0]
             if err == errno.EAGAIN or err == errno.EWOULDBLOCK:
-                formatted_time_left = format_time(time_left(benchmark))
-                log.info('Message will be sent after %s' % (
-                    formatted_time_left
-                ))
-                sleep(UDP_DELAY_IN_SECONDS)
+                log.info('Deadline: %s', format_time(time_left(timestamp)))
+                sleep(1)
                 continue
-            else:
-                log.info(e)
-                sys.exit(1)
+
+            log.error(e)
+            sys.exit(1)
 
     send_email()
 
